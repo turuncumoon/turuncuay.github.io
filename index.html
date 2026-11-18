@@ -1,0 +1,425 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>FitProgram — Antrenman Oluşturucu</title>
+    <style>
+        /* ===== MODERN TASARIM DEĞİŞKENLERİ ===== */
+        :root {
+            --bg: #0f172a;
+            --surface: #1e293b;
+            --surface-hover: #334155;
+            --border: #334155;
+            --text: #f1f5f9;
+            --text-muted: #94a3b8;
+            --accent: #22d3ee;
+            --accent-hover: #06b6d4;
+            --success: #34d399;
+            --danger: #f87171;
+            --radius: 16px;
+            --shadow: 0 8px 30px rgba(0, 0, 0, 0.4);
+            --font: 'Inter', system-ui, -apple-system, sans-serif;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: var(--font);
+            background: var(--bg);
+            color: var(--text);
+            line-height: 1.6;
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+        }
+
+        /* ===== BAŞLIK ===== */
+        header {
+            padding: 1.5rem 2rem;
+            border-bottom: 1px solid var(--border);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            flex-wrap: wrap;
+            gap: 1rem;
+        }
+
+        header h1 {
+            font-size: 1.6rem;
+            font-weight: 700;
+            background: linear-gradient(to right, var(--accent), #a78bfa);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        header .badge {
+            font-size: 0.75rem;
+            background: var(--surface);
+            padding: 0.3rem 0.8rem;
+            border-radius: 999px;
+            color: var(--text-muted);
+            border: 1px solid var(--border);
+        }
+
+        /* ===== ANA YERLEŞİM ===== */
+        .app-container {
+            display: grid;
+            grid-template-columns: 1fr 380px;
+            gap: 1.5rem;
+            padding: 1.5rem 2rem;
+            flex: 1;
+        }
+
+        @media (max-width: 1024px) {
+            .app-container {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        /* ===== FİLTRE ÇUBUĞU ===== */
+        .toolbar {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.8rem;
+            margin-bottom: 1.5rem;
+            align-items: center;
+        }
+
+        .toolbar input,
+        .toolbar select {
+            padding: 0.7rem 1rem;
+            border-radius: 12px;
+            border: 1px solid var(--border);
+            background: var(--surface);
+            color: var(--text);
+            font-size: 0.9rem;
+            outline: none;
+            transition: border-color 0.2s;
+            font-family: inherit;
+        }
+
+        .toolbar input:focus,
+        .toolbar select:focus {
+            border-color: var(--accent);
+        }
+
+        .toolbar input {
+            flex: 1;
+            min-width: 180px;
+        }
+
+        .toolbar select {
+            min-width: 140px;
+            cursor: pointer;
+        }
+
+        /* ===== EGZERSİZ KARTLARI ===== */
+        .exercise-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+            gap: 1.2rem;
+        }
+
+        .exercise-card {
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            overflow: hidden;
+            transition: transform 0.2s, box-shadow 0.2s;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .exercise-card:hover {
+            transform: translateY(-4px);
+            box-shadow: var(--shadow);
+            border-color: var(--accent);
+        }
+
+        .exercise-card .gif-wrapper {
+            background: #0b1120;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            height: 160px;
+            overflow: hidden;
+        }
+
+        .exercise-card .gif-wrapper img {
+            width: 100%;
+            height: 100%;
+            object-fit: contain;
+        }
+
+        .exercise-card .info {
+            padding: 0.9rem 1rem 1rem;
+            display: flex;
+            flex-direction: column;
+            gap: 0.4rem;
+            flex: 1;
+        }
+
+        .exercise-card .info h3 {
+            font-size: 0.95rem;
+            font-weight: 600;
+            text-transform: capitalize;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .exercise-card .tags {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.4rem;
+        }
+
+        .exercise-card .tag {
+            font-size: 0.7rem;
+            background: #0f172a;
+            color: var(--text-muted);
+            padding: 0.2rem 0.6rem;
+            border-radius: 999px;
+            border: 1px solid var(--border);
+            text-transform: capitalize;
+        }
+
+        .exercise-card button {
+            margin-top: auto;
+            padding: 0.6rem;
+            border: none;
+            border-radius: 10px;
+            background: var(--accent);
+            color: #0f172a;
+            font-weight: 600;
+            font-size: 0.85rem;
+            cursor: pointer;
+            transition: background 0.2s;
+            font-family: inherit;
+        }
+
+        .exercise-card button:hover {
+            background: var(--accent-hover);
+        }
+
+        .exercise-card button:disabled {
+            background: var(--surface-hover);
+            color: var(--text-muted);
+            cursor: not-allowed;
+        }
+
+        /* ===== PROGRAM PANELİ ===== */
+        .program-panel {
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            padding: 1.5rem;
+            height: fit-content;
+            position: sticky;
+            top: 1.5rem;
+            display: flex;
+            flex-direction: column;
+            gap: 1rem;
+        }
+
+        .program-panel h2 {
+            font-size: 1.2rem;
+            font-weight: 700;
+        }
+
+        .program-list {
+            list-style: none;
+            display: flex;
+            flex-direction: column;
+            gap: 0.7rem;
+            max-height: 400px;
+            overflow-y: auto;
+            padding-right: 0.2rem;
+        }
+
+        .program-item {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            background: var(--bg);
+            padding: 0.6rem 0.8rem;
+            border-radius: 12px;
+            border: 1px solid var(--border);
+            gap: 0.5rem;
+        }
+
+        .program-item .item-name {
+            font-size: 0.85rem;
+            flex: 1;
+            text-transform: capitalize;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .program-item .item-actions {
+            display: flex;
+            gap: 0.3rem;
+        }
+
+        .program-item .item-actions button {
+            background: transparent;
+            border: none;
+            color: var(--text-muted);
+            cursor: pointer;
+            font-size: 1rem;
+            padding: 0.2rem 0.4rem;
+            border-radius: 6px;
+            transition: background 0.2s, color 0.2s;
+        }
+
+        .program-item .item-actions button:hover {
+            background: var(--surface-hover);
+            color: var(--text);
+        }
+
+        .program-item .item-actions .remove-btn:hover {
+            color: var(--danger);
+        }
+
+        .empty-program {
+            color: var(--text-muted);
+            font-size: 0.9rem;
+            text-align: center;
+            padding: 2rem 0;
+        }
+
+        .program-actions {
+            display: flex;
+            gap: 0.7rem;
+            flex-wrap: wrap;
+        }
+
+        .program-actions button {
+            flex: 1;
+            padding: 0.7rem;
+            border: none;
+            border-radius: 12px;
+            font-weight: 600;
+            font-size: 0.85rem;
+            cursor: pointer;
+            transition: opacity 0.2s;
+            font-family: inherit;
+        }
+
+        .program-actions .save-btn {
+            background: var(--success);
+            color: #0f172a;
+        }
+
+        .program-actions .clear-btn {
+            background: var(--surface-hover);
+            color: var(--text);
+        }
+
+        .program-actions button:hover {
+            opacity: 0.85;
+        }
+
+        /* ===== YÜKLEME & DURUM ===== */
+        .loader {
+            text-align: center;
+            padding: 3rem;
+            color: var(--text-muted);
+        }
+
+        .loader .spinner {
+            width: 40px;
+            height: 40px;
+            border: 4px solid var(--border);
+            border-top-color: var(--accent);
+            border-radius: 50%;
+            animation: spin 0.8s linear infinite;
+            margin: 0 auto 1rem;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        .error-msg {
+            background: #450a0a;
+            color: #fca5a5;
+            padding: 1rem;
+            border-radius: 12px;
+            border: 1px solid #7f1d1d;
+            margin-bottom: 1rem;
+            font-size: 0.9rem;
+        }
+
+        /* ===== SCROLLBAR ===== */
+        ::-webkit-scrollbar {
+            width: 6px;
+        }
+        ::-webkit-scrollbar-track {
+            background: var(--bg);
+        }
+        ::-webkit-scrollbar-thumb {
+            background: var(--border);
+            border-radius: 3px;
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: var(--text-muted);
+        }
+    </style>
+</head>
+<body>
+    <header>
+        <h1>🏋️ FitProgram</h1>
+        <span class="badge">ExerciseDB V1 · Ücretsiz · 1500+ Egzersiz</span>
+    </header>
+
+    <div class="app-container">
+        <!-- Sol Taraf: Egzersiz Listesi -->
+        <main>
+            <div class="toolbar">
+                <input
+                    type="text"
+                    id="searchInput"
+                    placeholder="Egzersiz ara..."
+                    autocomplete="off"
+                />
+                <select id="bodyPartFilter">
+                    <option value="">Tüm Vücut Bölgeleri</option>
+                </select>
+                <select id="equipmentFilter">
+                    <option value="">Tüm Ekipmanlar</option>
+                </select>
+            </div>
+
+            <div id="errorContainer"></div>
+
+            <div id="exerciseList" class="exercise-grid">
+                <div class="loader">
+                    <div class="spinner"></div>
+                    <p>Egzersizler yükleniyor...</p>
+                </div>
+            </div>
+        </main>
+
+        <!-- Sağ Taraf: Program Paneli -->
+        <aside class="program-panel">
+            <h2>📋 Antrenman Programım</h2>
+            <ul id="programList" class="program-list">
+                <li class="empty-program">Henüz egzersiz eklenmedi.</li>
+            </ul>
+            <div class="program-actions">
+                <button class="save-btn" id="saveProgramBtn">💾 Programı Kaydet</button>
+                <button class="clear-btn" id="clearProgramBtn">🗑️ Temizle</button>
+            </div>
+        </aside>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+</html>
