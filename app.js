@@ -1,365 +1,300 @@
-// ============================================================
-//  FitProgram — Antrenman Oluşturucu
-//  ExerciseDB V1 API (https://oss.exercisedb.dev) kullanır.
-//  API anahtarı gerektirmez, 1500+ egzersiz ve GIF sunar.
-// ============================================================
+(() => {
+  "use strict";
 
-const API_URL = "https://oss.exercisedb.dev/api/v1/exercises";
+  // Primary CDN + official GitHub raw fallback.
+  const DATA_URLS = [
+    "https://cdn.jsdelivr.net/gh/yuhonas/free-exercise-db@main/dist/exercises.json",
+    "https://raw.githubusercontent.com/yuhonas/free-exercise-db/main/dist/exercises.json"
+  ];
+  const IMAGE_BASES = [
+    "https://cdn.jsdelivr.net/gh/yuhonas/free-exercise-db@main/exercises/",
+    "https://raw.githubusercontent.com/yuhonas/free-exercise-db/main/exercises/"
+  ];
+  const STORAGE_KEY = "forge_workout_v1";
+  const REQUEST_TIMEOUT = 12000;
+  const PAGE_SIZE = 90;
 
-// Uygulama durumu
-let allExercises = [];          // API'den gelen tüm egzersizler
-let filteredExercises = [];     // Filtrelenmiş egzersizler
-let selectedExercises = [];     // Programa eklenen egzersizler
+  const $ = id => document.getElementById(id);
+  const state = {
+    all: [], filtered: [], selected: [], level: "", search: "", muscle: "", equipment: ""
+  };
 
-// DOM elemanları
-const exerciseListEl = document.getElementById("exerciseList");
-const errorContainerEl = document.getElementById("errorContainer");
-const searchInput = document.getElementById("searchInput");
-const bodyPartFilter = document.getElementById("bodyPartFilter");
-const equipmentFilter = document.getElementById("equipmentFilter");
-const programListEl = document.getElementById("programList");
-const saveProgramBtn = document.getElementById("saveProgramBtn");
-const clearProgramBtn = document.getElementById("clearProgramBtn");
+  const translations = {
+    abdominals:"Karın", abductors:"Kalça dışı", adductors:"İç bacak", biceps:"Biceps", calves:"Baldır",
+    chest:"Göğüs", forearms:"Ön kol", glutes:"Kalça", hamstrings:"Arka bacak", lats:"Kanat",
+    lower_back:"Bel", middle_back:"Sırt", neck:"Boyun", quadriceps:"Ön bacak", shoulders:"Omuz",
+    traps:"Trapez", triceps:"Triceps", cardio:"Kardiyo", strength:"Kuvvet", stretching:"Esneme",
+    body_only:"Vücut ağırlığı", dumbbell:"Dambıl", barbell:"Barbell", cable:"Kablo", machine:"Makine",
+    kettlebells:"Kettlebell", bands:"Direnç bandı", exercise_ball:"Egzersiz topu", foam_roll:"Foam roller",
+    e_z_curl_bar:"EZ bar", other:"Diğer", beginner:"Başlangıç", intermediate:"Orta", expert:"İleri",
+    pull:"Çekiş", push:"İtiş", plyometrics:"Pliometrik", powerlifting:"Powerlifting",
+    olympic_weightlifting:"Olimpik halter"
+  };
 
-// ============================================================
-//  1. VERİ ÇEKME
-// ============================================================
-async function fetchExercises() {
+  function translate(value = "") {
+    const key = String(value).toLowerCase().replaceAll(" ", "_");
+    return translations[key] || String(value).replaceAll("_", " ").replace(/\b\w/g, c => c.toUpperCase());
+  }
+
+  function escapeHTML(value) {
+    return String(value ?? "").replace(/[&<>"']/g, c => ({
+      "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;", "'":"&#39;"
+    })[c]);
+  }
+
+  function imagePath(exercise, index = 0) {
+    const path = exercise.images?.[index] || exercise.images?.[0];
+    return path ? path.split("/").map(encodeURIComponent).join("/") : "";
+  }
+
+  function imageHTML(exercise, className = "", alt = "") {
+    const path = imagePath(exercise);
+    if (!path) return '<span class="img-fallback">F</span>';
+    const primary = IMAGE_BASES[0] + path;
+    const fallback = IMAGE_BASES[1] + path;
+    return `<img class="${className}" loading="lazy" src="${escapeHTML(primary)}" data-fallback="${escapeHTML(fallback)}" alt="${escapeHTML(alt)}" onerror="if(this.dataset.fallback){this.onerror=null;this.src=this.dataset.fallback}else{this.style.display='none';this.parentElement.classList.add('no-image')}">`;
+  }
+
+  function muscles(exercise) {
+    return (exercise.primaryMuscles || []).map(translate).join(", ") || translate(exercise.category || "fitness");
+  }
+
+  function toast(message) {
+    const element = $("toast");
+    if (!element) return;
+    element.textContent = message;
+    element.classList.add("show");
+    clearTimeout(toast.timer);
+    toast.timer = setTimeout(() => element.classList.remove("show"), 2300);
+  }
+
+  async function fetchJSONWithTimeout(url) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT);
     try {
-        const response = await fetch(API_URL);
-        if (!response.ok) {
-            throw new Error(`API yanıtı başarısız: ${response.status}`);
-        }
-        const data = await response.json();
+      const response = await fetch(url, {
+        method: "GET",
+        mode: "cors",
+        cache: "default",
+        signal: controller.signal,
+        headers: { "Accept": "application/json" }
+      });
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      const json = await response.json();
+      if (!Array.isArray(json) || json.length === 0) throw new Error("Beklenmeyen JSON biçimi");
+      return json;
+    } finally {
+      clearTimeout(timer);
+    }
+  }
 
-        // API yanıt yapısı: { success, meta, data: [...] }
-        if (!data.success || !Array.isArray(data.data)) {
-            throw new Error("Beklenmeyen API yanıt formatı.");
-        }
+  async function loadExercises() {
+    const grid = $("exerciseGrid");
+    const resultCount = $("resultCount");
+    grid.innerHTML = '<div class="loading"><div class="spinner"></div>Egzersizler yükleniyor...</div>';
+    resultCount.textContent = "Kaynağa bağlanıyor...";
 
-        allExercises = data.data;
-        filteredExercises = [...allExercises];
+    let loadedData = null;
+    const errors = [];
 
-        // Filtre seçeneklerini doldur
-        populateFilters();
-        // Egzersizleri göster
-        renderExercises();
+    for (const url of DATA_URLS) {
+      try {
+        loadedData = await fetchJSONWithTimeout(url);
+        break;
+      } catch (error) {
+        console.warn("Egzersiz kaynağı denenemedi:", url, error);
+        errors.push(error);
+      }
+    }
+
+    if (!loadedData) {
+      resultCount.textContent = "Bağlantı hatası";
+      grid.innerHTML = `
+        <div class="notice">
+          Egzersiz kütüphanesine şu anda ulaşılamıyor.<br><br>
+          <button class="btn primary" id="retryBtn" type="button">Tekrar dene</button>
+          <p style="font-size:11px">İnternet bağlantını kontrol et. Sorun devam ederse hosting sağlayıcısı dış kaynaklara erişimi engelliyor olabilir.</p>
+        </div>`;
+      $("retryBtn").addEventListener("click", loadExercises);
+      return;
+    }
+
+    state.all = loadedData;
+    $("libraryCount").textContent = state.all.length.toLocaleString("tr-TR");
+    populateFilters();
+    loadSaved();
+    applyFilters();
+  }
+
+  function populateFilters() {
+    const unique = values => [...new Set(values.filter(Boolean))].sort((a, b) => String(a).localeCompare(String(b)));
+    const muscleValues = unique(state.all.flatMap(e => e.primaryMuscles || []));
+    const equipmentValues = unique(state.all.map(e => e.equipment));
+    $("muscleFilter").innerHTML = '<option value="">Tüm kas grupları</option>' + muscleValues.map(v => `<option value="${escapeHTML(v)}">${escapeHTML(translate(v))}</option>`).join("");
+    $("equipmentFilter").innerHTML = '<option value="">Tüm ekipmanlar</option>' + equipmentValues.map(v => `<option value="${escapeHTML(v)}">${escapeHTML(translate(v))}</option>`).join("");
+  }
+
+  function applyFilters() {
+    const query = state.search.trim().toLocaleLowerCase("tr");
+    state.filtered = state.all.filter(e => {
+      const searchable = [e.name, ...(e.primaryMuscles || []), ...(e.secondaryMuscles || []), e.equipment, e.category].join(" ").toLocaleLowerCase("tr");
+      return (!query || searchable.includes(query)) &&
+        (!state.muscle || (e.primaryMuscles || []).includes(state.muscle)) &&
+        (!state.equipment || e.equipment === state.equipment) &&
+        (!state.level || e.level === state.level);
+    });
+    renderExercises();
+  }
+
+  function renderExercises() {
+    const exercises = state.filtered.slice(0, PAGE_SIZE);
+    $("resultCount").textContent = `${state.filtered.length.toLocaleString("tr-TR")} sonuç`;
+    if (!exercises.length) {
+      $("exerciseGrid").innerHTML = '<div class="notice">Aramana uygun hareket bulunamadı. Filtreleri değiştirmeyi dene.</div>';
+      return;
+    }
+    $("exerciseGrid").innerHTML = exercises.map(e => {
+      const added = state.selected.some(x => x.id === e.id);
+      return `<article class="exercise">
+        <div class="exercise-img">${imageHTML(e, "", e.name)}<span class="tag">${escapeHTML(translate(e.level || e.category || "fitness"))}</span></div>
+        <div class="exercise-info">
+          <div class="exercise-name">${escapeHTML(e.name)}</div>
+          <div class="exercise-meta">${escapeHTML(muscles(e))} · ${escapeHTML(translate(e.equipment || "other"))}</div>
+          <button class="add-btn ${added ? "added" : ""}" data-add="${escapeHTML(e.id)}" type="button">${added ? "✓ Eklendi" : "+ Programa ekle"}</button>
+        </div></article>`;
+    }).join("");
+    $("exerciseGrid").querySelectorAll("[data-add]").forEach(btn => btn.addEventListener("click", () => addExercise(btn.dataset.add)));
+  }
+
+  function addExercise(id) {
+    const exercise = state.all.find(e => e.id === id);
+    if (!exercise || state.selected.some(x => x.id === id)) return;
+    state.selected.push({ id, sets: 3, reps: 12, rest: 60 });
+    renderWorkout(); renderExercises(); saveProgram(false);
+    toast("Hareket programa eklendi");
+  }
+
+  function removeExercise(id) {
+    state.selected = state.selected.filter(x => x.id !== id);
+    renderWorkout(); renderExercises(); saveProgram(false);
+  }
+
+  function updateItem(id, key, value) {
+    const item = state.selected.find(x => x.id === id);
+    if (!item) return;
+    const limits = { sets: 20, reps: 100, rest: 600 };
+    item[key] = Math.max(1, Math.min(limits[key] || 999, Number(value) || 1));
+    updateStats(); saveProgram(false);
+  }
+
+  function moveItem(id, direction) {
+    const i = state.selected.findIndex(x => x.id === id), j = i + direction;
+    if (i < 0 || j < 0 || j >= state.selected.length) return;
+    [state.selected[i], state.selected[j]] = [state.selected[j], state.selected[i]];
+    renderWorkout(); saveProgram(false);
+  }
+
+  function renderWorkout() {
+    const list = $("workoutList");
+    if (!state.selected.length) {
+      list.innerHTML = '<div class="empty"><div class="empty-icon">＋</div>Henüz hareket eklemedin.<br>Soldaki kütüphaneden egzersiz seçerek programını oluşturmaya başla.</div>';
+      updateStats(); return;
+    }
+    list.innerHTML = state.selected.map(item => {
+      const e = state.all.find(x => x.id === item.id);
+      if (!e) return "";
+      return `<div class="workout-item">
+        <div class="workout-thumb">${imageHTML(e, "", e.name)}</div>
+        <div><div class="workout-item-name">${escapeHTML(e.name)}</div><div class="workout-item-muscle">${escapeHTML(muscles(e))}</div></div>
+        <div class="item-actions">
+          <button class="icon-btn" title="Yukarı taşı" data-up="${escapeHTML(item.id)}" type="button">↑</button>
+          <button class="icon-btn" title="Aşağı taşı" data-down="${escapeHTML(item.id)}" type="button">↓</button>
+          <button class="icon-btn" title="Kaldır" data-remove="${escapeHTML(item.id)}" type="button">×</button>
+        </div>
+        <div class="item-config">
+          <label><span class="mini-label">SET</span><br><input class="mini-field" type="number" min="1" max="20" value="${item.sets}" data-key="sets" data-id="${escapeHTML(item.id)}"></label>
+          <label><span class="mini-label">TEKRAR</span><br><input class="mini-field" type="number" min="1" max="100" value="${item.reps}" data-key="reps" data-id="${escapeHTML(item.id)}"></label>
+          <label><span class="mini-label">DİNLENME (SN)</span><br><input class="mini-field" type="number" min="1" max="600" value="${item.rest}" data-key="rest" data-id="${escapeHTML(item.id)}"></label>
+        </div></div>`;
+    }).join("");
+
+    list.querySelectorAll("[data-remove]").forEach(b => b.addEventListener("click", () => removeExercise(b.dataset.remove)));
+    list.querySelectorAll("[data-up]").forEach(b => b.addEventListener("click", () => moveItem(b.dataset.up, -1)));
+    list.querySelectorAll("[data-down]").forEach(b => b.addEventListener("click", () => moveItem(b.dataset.down, 1)));
+    list.querySelectorAll("[data-key]").forEach(input => input.addEventListener("change", () => updateItem(input.dataset.id, input.dataset.key, input.value)));
+    updateStats();
+  }
+
+  function updateStats() {
+    const count = state.selected.length;
+    const sets = state.selected.reduce((sum, x) => sum + Number(x.sets || 0), 0);
+    const seconds = state.selected.reduce((sum, x) => sum + Number(x.sets || 0) * Number(x.rest || 0) + Number(x.sets || 0) * Number(x.reps || 0) * 3, 0);
+    $("selectedCount").textContent = count;
+    $("totalSets").textContent = sets;
+    $("duration").textContent = `⏱ ~${Math.max(0, Math.round(seconds / 60))} dk`;
+    $("exerciseSummary").textContent = `${count} hareket`;
+  }
+
+  function saveProgram(showMessage = false) {
+    try {
+      const payload = { name: $("programName").value, selected: state.selected, savedAt: new Date().toISOString() };
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
+      if (showMessage) toast("Program bu tarayıcıya kaydedildi");
     } catch (error) {
-        console.error("Egzersizler yüklenirken hata:", error);
-        showError(
-            "Egzersiz verileri yüklenemedi. Lütfen internet bağlantınızı kontrol edin ve sayfayı yenileyin. " +
-            "Hata detayı: " + error.message
-        );
-        // Yükleme animasyonunu kaldır, hata mesajı göster
-        exerciseListEl.innerHTML = `
-            <div class="loader">
-                <p>⚠️ Veriler yüklenemedi.</p>
-            </div>
-        `;
+      console.error("Program kaydedilemedi:", error);
+      if (showMessage) toast("Tarayıcı kaydına izin verilmiyor");
     }
-}
+  }
 
-// ============================================================
-//  2. FİLTRELERİ DOLDURMA
-// ============================================================
-function populateFilters() {
-    // Vücut bölgelerini topla (benzersiz)
-    const bodyParts = new Set();
-    const equipments = new Set();
-
-    allExercises.forEach((ex) => {
-        (ex.bodyParts || []).forEach((bp) => bodyParts.add(bp));
-        (ex.equipments || []).forEach((eq) => equipments.add(eq));
-    });
-
-    // Vücut bölgesi filtresi
-    bodyPartFilter.innerHTML = '<option value="">Tüm Vücut Bölgeleri</option>';
-    [...bodyParts].sort().forEach((bp) => {
-        const opt = document.createElement("option");
-        opt.value = bp;
-        opt.textContent = capitalize(bp);
-        bodyPartFilter.appendChild(opt);
-    });
-
-    // Ekipman filtresi
-    equipmentFilter.innerHTML = '<option value="">Tüm Ekipmanlar</option>';
-    [...equipments].sort().forEach((eq) => {
-        const opt = document.createElement("option");
-        opt.value = eq;
-        opt.textContent = capitalize(eq);
-        equipmentFilter.appendChild(opt);
-    });
-}
-
-// ============================================================
-//  3. EGZERSİZLERİ RENDER ETME
-// ============================================================
-function renderExercises() {
-    if (!filteredExercises.length) {
-        exerciseListEl.innerHTML = `
-            <div class="loader">
-                <p>🔍 Aramanızla eşleşen egzersiz bulunamadı.</p>
-            </div>
-        `;
-        return;
-    }
-
-    const fragment = document.createDocumentFragment();
-
-    filteredExercises.forEach((ex) => {
-        const card = document.createElement("div");
-        card.className = "exercise-card";
-
-        // GIF veya placeholder
-        const gifUrl = ex.gifUrl || "";
-        const gifHtml = gifUrl
-            ? `<img src="${gifUrl}" alt="${ex.name}" loading="lazy" />`
-            : `<span style="color: var(--text-muted); font-size: 0.8rem;">Görsel yok</span>`;
-
-        // Etiketler
-        const bodyParts = (ex.bodyParts || []).map((bp) => `<span class="tag">${capitalize(bp)}</span>`).join("");
-        const equipments = (ex.equipments || []).map((eq) => `<span class="tag">${capitalize(eq)}</span>`).join("");
-        const targetMuscles = (ex.targetMuscles || []).slice(0, 2).map((tm) => `<span class="tag">${capitalize(tm)}</span>`).join("");
-
-        // Programda zaten var mı?
-        const isAdded = selectedExercises.some((s) => s.exerciseId === ex.exerciseId);
-
-        card.innerHTML = `
-            <div class="gif-wrapper">${gifHtml}</div>
-            <div class="info">
-                <h3 title="${ex.name}">${ex.name}</h3>
-                <div class="tags">${bodyParts} ${equipments} ${targetMuscles}</div>
-                <button ${isAdded ? "disabled" : ""} data-id="${ex.exerciseId}">
-                    ${isAdded ? "✓ Eklendi" : "+ Programa Ekle"}
-                </button>
-            </div>
-        `;
-
-        // Ekleme butonu olayı
-        const btn = card.querySelector("button");
-        if (!isAdded) {
-            btn.addEventListener("click", () => addToProgram(ex));
-        }
-
-        fragment.appendChild(card);
-    });
-
-    exerciseListEl.innerHTML = "";
-    exerciseListEl.appendChild(fragment);
-}
-
-// ============================================================
-//  4. PROGRAM YÖNETİMİ
-// ============================================================
-function addToProgram(exercise) {
-    if (selectedExercises.some((s) => s.exerciseId === exercise.exerciseId)) return;
-
-    selectedExercises.push({
-        exerciseId: exercise.exerciseId,
-        name: exercise.name,
-        gifUrl: exercise.gifUrl || "",
-        bodyParts: exercise.bodyParts || [],
-        equipments: exercise.equipments || [],
-        targetMuscles: exercise.targetMuscles || [],
-        instructions: exercise.instructions || [],
-    });
-
-    saveToLocalStorage();
-    renderProgram();
-    renderExercises(); // Buton durumlarını güncelle
-}
-
-function removeFromProgram(exerciseId) {
-    selectedExercises = selectedExercises.filter((s) => s.exerciseId !== exerciseId);
-    saveToLocalStorage();
-    renderProgram();
-    renderExercises();
-}
-
-function moveUp(index) {
-    if (index <= 0) return;
-    [selectedExercises[index - 1], selectedExercises[index]] = [
-        selectedExercises[index],
-        selectedExercises[index - 1],
-    ];
-    saveToLocalStorage();
-    renderProgram();
-}
-
-function moveDown(index) {
-    if (index >= selectedExercises.length - 1) return;
-    [selectedExercises[index], selectedExercises[index + 1]] = [
-        selectedExercises[index + 1],
-        selectedExercises[index],
-    ];
-    saveToLocalStorage();
-    renderProgram();
-}
-
-function clearProgram() {
-    if (!selectedExercises.length) return;
-    if (!confirm("Tüm programı temizlemek istediğinize emin misiniz?")) return;
-    selectedExercises = [];
-    saveToLocalStorage();
-    renderProgram();
-    renderExercises();
-}
-
-// ============================================================
-//  5. PROGRAMI RENDER ETME
-// ============================================================
-function renderProgram() {
-    if (!selectedExercises.length) {
-        programListEl.innerHTML = '<li class="empty-program">Henüz egzersiz eklenmedi.</li>';
-        return;
-    }
-
-    const fragment = document.createDocumentFragment();
-
-    selectedExercises.forEach((ex, index) => {
-        const li = document.createElement("li");
-        li.className = "program-item";
-
-        li.innerHTML = `
-            <span class="item-name" title="${ex.name}">${ex.name}</span>
-            <div class="item-actions">
-                <button class="move-up" data-index="${index}" title="Yukarı taşı">↑</button>
-                <button class="move-down" data-index="${index}" title="Aşağı taşı">↓</button>
-                <button class="remove-btn" data-id="${ex.exerciseId}" title="Kaldır">✕</button>
-            </div>
-        `;
-
-        // Olay dinleyicileri
-        li.querySelector(".move-up").addEventListener("click", () => moveUp(index));
-        li.querySelector(".move-down").addEventListener("click", () => moveDown(index));
-        li.querySelector(".remove-btn").addEventListener("click", () => removeFromProgram(ex.exerciseId));
-
-        fragment.appendChild(li);
-    });
-
-    programListEl.innerHTML = "";
-    programListEl.appendChild(fragment);
-}
-
-// ============================================================
-//  6. LOCALSTORAGE KAYIT / YÜKLEME
-// ============================================================
-function saveToLocalStorage() {
+  function loadSaved() {
     try {
-        localStorage.setItem("fitprogram_selected", JSON.stringify(selectedExercises));
-    } catch (e) {
-        console.warn("LocalStorage kayıt hatası:", e);
+      const saved = JSON.parse(localStorage.getItem(STORAGE_KEY) || "null");
+      if (!saved) return;
+      $("programName").value = saved.name || "Yeni Antrenman Programı";
+      state.selected = (saved.selected || []).filter(x => state.all.some(e => e.id === x.id));
+      renderWorkout();
+    } catch (error) {
+      console.warn("Kayıt okunamadı:", error);
     }
-}
+  }
 
-function loadFromLocalStorage() {
-    try {
-        const stored = localStorage.getItem("fitprogram_selected");
-        if (stored) {
-            selectedExercises = JSON.parse(stored);
-        }
-    } catch (e) {
-        console.warn("LocalStorage yükleme hatası:", e);
-        selectedExercises = [];
-    }
-}
-
-// ============================================================
-//  7. PROGRAMI DIŞA AKTARMA (JSON İNDİRME)
-// ============================================================
-function exportProgram() {
-    if (!selectedExercises.length) {
-        alert("Program boş. Lütfen önce egzersiz ekleyin.");
-        return;
-    }
-
-    const exportData = {
-        programName: "Antrenman Programım",
-        createdAt: new Date().toISOString(),
-        exercises: selectedExercises.map((ex) => ({
-            id: ex.exerciseId,
-            name: ex.name,
-            bodyParts: ex.bodyParts,
-            equipments: ex.equipments,
-            targetMuscles: ex.targetMuscles,
-            instructions: ex.instructions,
-            gifUrl: ex.gifUrl,
-        })),
+  function exportProgram() {
+    const data = {
+      program: $("programName").value,
+      createdAt: new Date().toISOString(),
+      exercises: state.selected.map(item => {
+        const e = state.all.find(x => x.id === item.id);
+        return { name: e?.name, muscles: e?.primaryMuscles, equipment: e?.equipment, sets: item.sets, reps: item.reps, restSeconds: item.rest, image: e ? IMAGE_BASES[0] + imagePath(e) : "" };
+      })
     };
-
-    const blob = new Blob([JSON.stringify(exportData, null, 2)], {
-        type: "application/json",
-    });
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
-    a.href = url;
-    a.download = "antrenman-programi.json";
-    a.click();
-    URL.revokeObjectURL(url);
-}
+    a.href = url; a.download = "forge-antrenman-programi.json"; a.click();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    toast("Program JSON olarak indirildi");
+  }
 
-// ============================================================
-//  8. FİLTRELEME MANTIĞI
-// ============================================================
-function applyFilters() {
-    const searchTerm = searchInput.value.toLowerCase().trim();
-    const selectedBodyPart = bodyPartFilter.value;
-    const selectedEquipment = equipmentFilter.value;
+  // UI events
+  $("searchInput").addEventListener("input", e => { state.search = e.target.value; applyFilters(); });
+  $("muscleFilter").addEventListener("change", e => { state.muscle = e.target.value; applyFilters(); });
+  $("equipmentFilter").addEventListener("change", e => { state.equipment = e.target.value; applyFilters(); });
+  $("levelChips").querySelectorAll("[data-level]").forEach(btn => btn.addEventListener("click", () => {
+    state.level = btn.dataset.level;
+    $("levelChips").querySelectorAll(".chip").forEach(x => x.classList.toggle("active", x === btn));
+    applyFilters();
+  }));
+  $("saveBtn").addEventListener("click", () => saveProgram(true));
+  $("printBtn").addEventListener("click", () => window.print());
+  $("exportBtn").addEventListener("click", exportProgram);
+  $("clearBtn").addEventListener("click", () => {
+    if (!confirm("Programındaki tüm hareketler silinsin mi?")) return;
+    state.selected = [];
+    $("programName").value = "Yeni Antrenman Programı";
+    try { localStorage.removeItem(STORAGE_KEY); } catch (error) { console.warn(error); }
+    renderWorkout(); renderExercises(); toast("Program sıfırlandı");
+  });
+  $("programName").addEventListener("change", () => saveProgram(false));
 
-    filteredExercises = allExercises.filter((ex) => {
-        // Arama filtresi (isim, hedef kaslar, ekipman)
-        const matchesSearch =
-            !searchTerm ||
-            ex.name.toLowerCase().includes(searchTerm) ||
-            (ex.targetMuscles || []).some((tm) => tm.toLowerCase().includes(searchTerm)) ||
-            (ex.equipments || []).some((eq) => eq.toLowerCase().includes(searchTerm));
-
-        // Vücut bölgesi filtresi
-        const matchesBodyPart =
-            !selectedBodyPart || (ex.bodyParts || []).includes(selectedBodyPart);
-
-        // Ekipman filtresi
-        const matchesEquipment =
-            !selectedEquipment || (ex.equipments || []).includes(selectedEquipment);
-
-        return matchesSearch && matchesBodyPart && matchesEquipment;
-    });
-
-    renderExercises();
-}
-
-// ============================================================
-//  9. YARDIMCI FONKSİYONLAR
-// ============================================================
-function capitalize(str) {
-    if (!str) return "";
-    return str.charAt(0).toUpperCase() + str.slice(1);
-}
-
-function showError(message) {
-    errorContainerEl.innerHTML = `<div class="error-msg">${message}</div>`;
-}
-
-// ============================================================
-//  10. BAŞLATMA & OLAY DİNLEYİCİLERİ
-// ============================================================
-function init() {
-    // LocalStorage'dan programı yükle
-    loadFromLocalStorage();
-    renderProgram();
-
-    // API'den egzersizleri çek
-    fetchExercises();
-
-    // Filtre olayları
-    searchInput.addEventListener("input", applyFilters);
-    bodyPartFilter.addEventListener("change", applyFilters);
-    equipmentFilter.addEventListener("change", applyFilters);
-
-    // Program butonları
-    saveProgramBtn.addEventListener("click", exportProgram);
-    clearProgramBtn.addEventListener("click", clearProgram);
-}
-
-// Uygulamayı başlat
-init();
+  loadExercises();
+})();
