@@ -14,6 +14,52 @@
   const REQUEST_TIMEOUT = 12000;
   const PAGE_SIZE = 90;
 
+  // Local emergency catalogue: the app remains usable even when the host
+  // blocks external JSON/CDN requests. Exercise records are based on the
+  // Unlicense Free Exercise DB vocabulary; image URLs are optional.
+  const OFFLINE_EXERCISES = [
+    ["Push-Up","Göğüs","beginner","body only","Push-Up"],
+    ["Bench Press","Göğüs","beginner","barbell","Barbell_Bench_Press"],
+    ["Dumbbell Bench Press","Göğüs","beginner","dumbbell","Dumbbell_Bench_Press"],
+    ["Incline Dumbbell Press","Göğüs","intermediate","dumbbell","Incline_Dumbbell_Press"],
+    ["Chest Dip","Göğüs","intermediate","body only","Chest_Dip"],
+    ["Pull-Up","Kanat","intermediate","body only","Pull-Up"],
+    ["Lat Pulldown","Kanat","beginner","machine","Lat_Pulldown"],
+    ["Bent Over Barbell Row","Sırt","intermediate","barbell","Bent_Over_Barbell_Row"],
+    ["Seated Cable Row","Sırt","beginner","cable","Seated_Cable_Rows"],
+    ["Deadlift","Arka bacak","intermediate","barbell","Barbell_Deadlift"],
+    ["Barbell Squat","Ön bacak","intermediate","barbell","Barbell_Squat"],
+    ["Goblet Squat","Ön bacak","beginner","dumbbell","Goblet_Squat"],
+    ["Walking Lunge","Ön bacak","beginner","body only","Bodyweight_Walking_Lunge"],
+    ["Leg Press","Ön bacak","beginner","machine","Leg_Press"],
+    ["Romanian Deadlift","Arka bacak","intermediate","barbell","Romanian_Deadlift"],
+    ["Standing Calf Raises","Baldır","beginner","body only","Standing_Calf_Raises"],
+    ["Dumbbell Shoulder Press","Omuz","beginner","dumbbell","Dumbbell_Shoulder_Press"],
+    ["Lateral Raise","Omuz","beginner","dumbbell","Side_Lateral_Raise"],
+    ["Barbell Biceps Curl","Biceps","beginner","barbell","Barbell_Curl"],
+    ["Hammer Curl","Biceps","beginner","dumbbell","Hammer_Curls"],
+    ["Triceps Pushdown","Triceps","beginner","cable","Triceps_Pushdown"],
+    ["Overhead Triceps Extension","Triceps","beginner","dumbbell","Standing_Dumbbell_Triceps_Extension"],
+    ["Plank","Karın","beginner","body only","Plank"],
+    ["Crunch","Karın","beginner","body only","Crunch"],
+    ["Air Bike","Karın","beginner","body only","Air_Bike"],
+    ["Mountain Climbers","Karın","beginner","body only","Mountain_Climbers"],
+    ["Jumping Jacks","Kardiyo","beginner","body only","Jumping_Jacks"],
+    ["Burpee","Kardiyo","intermediate","body only","Burpee"],
+    ["Glute Bridge","Kalça","beginner","body only","Glute_Bridge"],
+    ["Hip Thrust","Kalça","intermediate","barbell","Barbell_Hip_Thrust"]
+  ].map(([name, muscle, level, equipment, folder], index) => ({
+    id: `forge-offline-${index + 1}`,
+    name,
+    level,
+    equipment,
+    primaryMuscles: [muscle],
+    secondaryMuscles: [],
+    category: "strength",
+    instructions: [],
+    images: [`${folder}/0.jpg`, `${folder}/1.jpg`]
+  }));
+
   const $ = id => document.getElementById(id);
   const state = {
     all: [], filtered: [], selected: [], level: "", search: "", muscle: "", equipment: ""
@@ -108,18 +154,24 @@
     }
 
     if (!loadedData) {
-      resultCount.textContent = "Bağlantı hatası";
-      grid.innerHTML = `
-        <div class="notice">
-          Egzersiz kütüphanesine şu anda ulaşılamıyor.<br><br>
-          <button class="btn primary" id="retryBtn" type="button">Tekrar dene</button>
-          <p style="font-size:11px">İnternet bağlantını kontrol et. Sorun devam ederse hosting sağlayıcısı dış kaynaklara erişimi engelliyor olabilir.</p>
-        </div>`;
-      $("retryBtn").addEventListener("click", loadExercises);
-      return;
+      // Do not leave the user with an empty screen: show a local starter set.
+      state.all = OFFLINE_EXERCISES;
+      resultCount.textContent = "Çevrimdışı katalog";
+      grid.insertAdjacentHTML("beforebegin", `
+        <div class="notice" id="offlineNotice" style="padding:10px 14px;text-align:left;font-size:11px">
+          Dış veri kaynaklarına erişilemedi. Şimdilik uygulama içindeki 30 temel hareket gösteriliyor; tam katalog için bağlantı gerekir.
+          <button class="btn small" id="retryBtn" type="button" style="margin-left:8px">Tekrar dene</button>
+        </div>`);
+      $("retryBtn").addEventListener("click", () => {
+        $("offlineNotice")?.remove();
+        loadExercises();
+      });
+    } else {
+      state.all = loadedData;
+      $("offlineNotice")?.remove();
+      resultCount.textContent = `${state.all.length.toLocaleString("tr-TR")} hareket`;
     }
 
-    state.all = loadedData;
     $("libraryCount").textContent = state.all.length.toLocaleString("tr-TR");
     populateFilters();
     loadSaved();
