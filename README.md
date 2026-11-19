@@ -1,2 +1,0 @@
-# turuncuay.github.io
-cynefin
